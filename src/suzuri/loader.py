@@ -8,9 +8,9 @@ from dataclasses import replace
 from typing import Any, Literal
 from suzuri.cache import _TemplateCache
 from suzuri.html import template_comment
+from suzuri.artifacts import _ArtifactStore
 from suzuri.errors import TemplateNotFound
 from suzuri.asynchronous import _async_stream
-from suzuri.artifacts import _ArtifactStore, _RendererLoader
 from importlib.util import module_from_spec, spec_from_loader
 from collections.abc import Mapping, Callable, Generator, AsyncGenerator
 from suzuri._validation import validate_template_name, validate_compile_options
@@ -35,9 +35,13 @@ class Engine:
         chunk_size: int = 8192, verify_artifacts: Literal['eager', 'on_load'] = 'eager',
         on_render: Callable[[RenderEvent], object] | None = None,
         optimize: bool = True, minify_html: bool = False, template_comments: bool = False,
+        bytecode: bool = False,
     ) -> None:
         if type(preload) is not bool:
             raise TypeError('preload must be a boolean')
+
+        if type(bytecode) is not bool:
+            raise TypeError('bytecode must be a boolean')
 
         if not isinstance(verify_artifacts, str):
             raise TypeError("verify_artifacts must be 'eager' or 'on_load'")
@@ -58,6 +62,7 @@ class Engine:
         self._preload = preload
         self._verify_artifacts = verify_artifacts
         self._optimize = optimize
+        self._bytecode = bytecode
         self._lock = RLock()
         self._loaded: dict[str, _CompiledTemplate] = {}
         self._templates: dict[str, Template] = {}
@@ -74,6 +79,7 @@ class Engine:
             self._cache = _TemplateCache(
                 self.path, self.compiled_dir, application_version=application_version or '',
                 optimize=optimize, minify_html=minify_html, template_comments=template_comments,
+                bytecode=bytecode,
             )
 
         if preload:
@@ -92,6 +98,11 @@ class Engine:
     def optimize(self) -> bool:
         """Whether to optimize newly compiled templates; existing bundles are unchanged."""
         return self._optimize
+
+    @property
+    def bytecode(self) -> bool:
+        """Whether to generate bytecode for new views; bundles use compatible bytecode automatically."""
+        return self._bytecode
 
     @property
     def preload(self) -> bool:
@@ -197,9 +208,8 @@ class Engine:
 
             module_name = artifacts.modules[name]
             filename = module_name + '.py'
-            code = artifacts.load_code(name)
             path = str(artifacts.path / filename)
-            loader = _RendererLoader(path, code)
+            loader = artifacts.renderer_loader(name)
             spec = spec_from_loader('_suzuri_bundle_' + module_name, loader, origin=path)
             assert spec is not None
             module = module_from_spec(spec)

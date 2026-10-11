@@ -12,8 +12,10 @@ from suzuri.parser import Parser
 from suzuri.errors import BuildError
 from dataclasses import replace, dataclass
 from suzuri.compiler import compile_parsed
+from suzuri.artifacts import _bytecode_format
 from suzuri.runtime import VERSION as VERSION
 from suzuri._validation import validate_compile_options
+from py_compile import PycInvalidationMode, compile as compile_bytecode
 from suzuri.runtime import ABI_VERSION, PYTHON_REQUIRES, ESCAPING_POLICY, COMPILER_REVISION
 from suzuri.model import Loop, Node, Import, Scoped, Source, Include, Template, Component, Parameter, Conditional
 
@@ -134,6 +136,7 @@ def build(
     application_version: str = '',
     minify_html: bool = False,
     template_comments: bool = False,
+    bytecode: bool = False,
 ) -> BuildResult:
     """Publish a new immutable bundle. The output directory must not already exist.
 
@@ -141,7 +144,11 @@ def build(
     never imports helpers. Includes resolve relative to the including template.
     minify_html and template_comments bake static HTML processing into the generated
     modules, including direct imports and streams. Engine options are not required.
+    bytecode adds interpreter-specific .pyc files alongside the generated source.
     """
+    if type(bytecode) is not bool:
+        raise TypeError('bytecode must be a boolean')
+
     validate_compile_options(optimize=optimize, minify_html=minify_html, template_comments=template_comments)
     if not isinstance(application_version, str):
         raise TypeError('application_version must be a string')
@@ -208,6 +215,7 @@ def build(
             'imports': compilation.imports,
         }
 
+    hashes = {name: sha256(content.encode('utf-8')).hexdigest() for name, content in sorted(artifacts.items())}
     manifest: dict[str, object] = {
         'schema': 1,
         'compiler_version': VERSION,
@@ -219,18 +227,35 @@ def build(
         'options': {
             'optimize': optimize, 'pattern': pattern,
             'minify_html': minify_html, 'template_comments': template_comments,
+            'bytecode': bytecode,
         },
         'sources': dict(sorted(sources.items())),
         'templates': entries,
-        'artifacts': {name: sha256(content.encode('utf-8')).hexdigest() for name, content in sorted(artifacts.items())},
+        'artifacts': hashes,
     }
-    artifacts['manifest.json'] = dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + '\n'
+    if bytecode:
+        manifest['bytecode'] = _bytecode_format()
+
     output.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(mkdtemp(prefix='.suzuri-', dir=output.parent))
     try:
         for name, content in artifacts.items():
             (staging / name).write_text(content, encoding='utf-8', newline='\n')
 
+        if bytecode:
+            for name in artifacts:
+                if not name.endswith('.py') or name == '__init__.py' or name.endswith('_check.py'):
+                    continue
+                compiled_path = staging / (name + 'c')
+                compile_bytecode(
+                    str(staging / name), cfile=str(compiled_path), dfile=name,
+                    doraise=True, invalidation_mode=PycInvalidationMode.CHECKED_HASH,
+                )
+                hashes[compiled_path.name] = sha256(compiled_path.read_bytes()).hexdigest()
+
+        (staging / 'manifest.json').write_text(
+            dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + '\n', encoding='utf-8', newline='\n',
+        )
         staging.rename(output)
     finally:
         if staging.is_dir():

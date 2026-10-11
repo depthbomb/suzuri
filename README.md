@@ -60,6 +60,18 @@ Each view gets a hashed subdirectory containing its Python renderer, type hints,
 
 Compilation targets Python 3.14 when running on 3.14 and Python 3.15 when running on 3.15. A bundle built on 3.14 works on both versions. A bundle built on 3.15 requires 3.15 or newer, even if its templates only use older syntax. The manifest records this requirement, and `Engine` checks it before loading any renderer. Build with Python 3.14 when deploying the same bundle to both versions. Source templates compile separately on each version, so both can share a cache directory.
 
+Pass `bytecode=True` to `Engine` to save `.pyc` files when it compiles a view:
+
+```python
+engine = Engine('templates', compiled_dir='compiled_views', bytecode=True)
+```
+
+Bytecode saves Python compilation work when a new engine loads a cached view. It helps with startup and worker restarts; rendering after a view is loaded works the same way. The default is `False`. Bytecode generation stays lazy, and the generated `.py` files remain available for tracebacks and compatibility.
+
+Bytecode caches are separate from source-only caches and are specific to the interpreter's cache tag, bytecode format, and `-O`/`-OO` level. These Python optimization levels are independent of Suzuri's `optimize` setting. Existing bundles automatically use compatible bytecode, regardless of the engine's `bytecode` option. When it doesn't match, the engine compiles the bundled `.py` in memory without writing to the bundle. A 3.14 bundle can therefore use its bytecode on 3.14 and its source on 3.15. The bundle's minimum Python requirement still applies.
+
+Bytecode files are covered by the same manifest hashes as other artifacts. Missing or modified files cause a bundle validation error; source caches rebuild the affected view when its template sources are available. Keep both `.py` and `.pyc` files when deploying a bytecode bundle.
+
 You may also see a `compiled_views.locks` directory beside the cache. It coordinates compilation between workers. Leave it in place while the app is running; clearing compiled views doesn't require deleting it.
 
 Compiler revisions use separate source-cache entries. After updating Suzuri, keep template sources available so affected views can recompile. Prebuilt bundles from an older compiler revision must be rebuilt with `build()`.
@@ -253,6 +265,7 @@ All options after `directory` are keyword-only. Configuration is fixed when the 
 | `verify_artifacts` | `'eager'` | For bundles, verify artifacts at construction or use `'on_load'` to verify each template when first loaded. Manifest and version checks always happen at construction. Source caches are always verified before loading. |
 | `on_render` | `None` | Synchronous callback receiving a `RenderEvent`. |
 | `optimize` | `True` | Optimize newly compiled templates. `False` uses the reference compiler output and a separate cache entry. Existing bundles keep their compiled settings. |
+| `bytecode` | `False` | Generate `.pyc` files for new source-cache entries. Existing bundles automatically load compatible bytecode and fall back to their `.py` source when needed. |
 | `minify_html` | `False` | Minify static HTML during compilation. For bundles built without minification, process rendered output and buffer streams. |
 | `template_comments` | `False` | Append template metadata comments, preserving comments already baked into a bundle. |
 
@@ -287,7 +300,9 @@ Deploy your templates, Suzuri, and any helper modules your templates import. Kee
 
 For tooling, `compile_template(source, *, filename='<template>', optimize=True, minify_html=False, template_comments=False)` returns a `Compilation` containing generated code, a stub, a checker, a source map, context names, import metadata, and `python_requires` without writing files or importing helpers. The source and filename are strings. Includes and components need filesystem resolution, so use `Engine` or `build()` for those templates. Run the generated checker with a matching Python target, such as `python -m mypy --python-version 3.15 path/to/checker.py` for a 3.15 bundle.
 
-`build(source_dir, output_dir, *, pattern='**/*.html', optimize=True, application_version='', minify_html=False, template_comments=False)` compiles a directory into a new bundle. The output directory must not exist, and source and output directories must not overlap. `pattern` is a relative POSIX glob. The returned `BuildResult` exposes `path`, `template_names`, and `manifest`.
+`build(source_dir, output_dir, *, pattern='**/*.html', optimize=True, application_version='', minify_html=False, template_comments=False, bytecode=False)` compiles a directory into a new bundle. The output directory must not exist, and source and output directories must not overlap. `pattern` is a relative POSIX glob. The returned `BuildResult` exposes `path`, `template_names`, and `manifest`.
+
+Use `build('templates', 'bundle', bytecode=True)` to include precompiled `.pyc` renderers for `Engine`. Build with the Python interpreter and optimization level used in production to get the loading benefit. The bytecode is hash-based and reproducible for the same inputs and interpreter settings, and bundles can be moved after building. Direct imports of generated `.py` modules still work and use Python's normal `__pycache__` mechanism. `compile_template()` continues returning source and tooling data without writing files.
 
 Existing bundles work with `Engine(bundle_path)`. Their handles load helpers lazily, just like source templates. Use `template.module` to load one explicitly, or `preload=True` to load every template during engine construction.
 
@@ -311,3 +326,5 @@ There are also local benchmarks in [benchmarks](benchmarks/). Run `python benchm
 The test workflow checks both Python versions on Linux, Windows, and macOS, including installed wheels and framework examples. Cross-version tests also check bundle compatibility and separate cache entries. To run those locally, set `SUZURI_PYTHON314` and `SUZURI_PYTHON315` to the Python executables in virtual environments with Suzuri installed, then run `python -m pytest tests/test_python_versions.py`.
 
 On Python 3.15, compiler imports wait until you compile source templates or access compiler APIs. Loading and rendering a prebuilt bundle avoids those imports. Python 3.14 imports them normally; template helper imports still wait until the template is loaded on both versions.
+
+Run `python benchmarks/bytecode.py --output path/to/results.json` to compare fresh-process loading and repeated rendering with and without bytecode. It covers prebuilt bundles and persistent source caches with small, medium, and large generated renderers.

@@ -11,8 +11,8 @@ from suzuri.build import build
 from dataclasses import dataclass
 from collections.abc import Generator
 from contextlib import contextmanager
-from suzuri.artifacts import _ArtifactStore
 from suzuri._validation import validate_template_name
+from suzuri.artifacts import _ArtifactStore, _bytecode_format
 from suzuri.errors import BuildError, ArtifactError, TemplateNotFound
 from suzuri.runtime import VERSION, ABI_VERSION, PYTHON_REQUIRES, ESCAPING_POLICY, COMPILER_REVISION
 
@@ -24,10 +24,10 @@ else:
 @dataclass
 class _CacheEntry:
     store: _ArtifactStore
-    files: tuple[Path, Path]
+    files: tuple[Path, ...]
     signature: tuple[tuple[int, int, int], ...]
 
-def _signature(files: tuple[Path, Path]) -> tuple[tuple[int, int, int], ...]:
+def _signature(files: tuple[Path, ...]) -> tuple[tuple[int, int, int], ...]:
     stats = (path.stat() for path in files)
     return tuple((stat.st_ino, stat.st_mtime_ns, stat.st_size) for stat in stats)
 
@@ -68,7 +68,7 @@ class _TemplateCache:
 
     def __init__(
         self, source: Path, directory: Path, *, application_version: str,
-        optimize: bool, minify_html: bool, template_comments: bool,
+        optimize: bool, minify_html: bool, template_comments: bool, bytecode: bool,
     ) -> None:
         if not source.is_dir():
             raise BuildError(f'Template directory does not exist: {source}')
@@ -82,8 +82,9 @@ class _TemplateCache:
         self.optimize = optimize
         self.minify_html = minify_html
         self.template_comments = template_comments
+        self.bytecode = bytecode
         self._entries: dict[str, _CacheEntry] = {}
-        identity = {
+        identity: dict[str, object] = {
             'source': str(source), 'compiler': VERSION, 'abi': ABI_VERSION,
             'compiler_revision': COMPILER_REVISION,
             'python_requires': PYTHON_REQUIRES,
@@ -93,6 +94,9 @@ class _TemplateCache:
         if not optimize:
             # Separate reference output from optimized views within this revision.
             identity['optimize'] = False
+
+        if bytecode:
+            identity['bytecode'] = _bytecode_format()
 
         self._identity = dumps(identity, sort_keys=True)
 
@@ -128,7 +132,7 @@ class _TemplateCache:
                 self._compile(path, name)
                 store = self._read(path, name)
 
-            files = (path / 'manifest.json', path / (store.modules[name] + '.py'))
+            files = (path / 'manifest.json', *store.renderer_files(name))
             self._entries[name] = _CacheEntry(store, files, _signature(files))
             return store
 
@@ -152,6 +156,7 @@ class _TemplateCache:
                 self.source, staging, pattern=escape(name),
                 application_version=self.application_version, optimize=self.optimize,
                 minify_html=self.minify_html, template_comments=self.template_comments,
+                bytecode=self.bytecode,
             )
             if path.exists():
                 path.rename(retired)

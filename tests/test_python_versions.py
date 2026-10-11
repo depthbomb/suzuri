@@ -94,11 +94,12 @@ def test_unpacking_checker_and_stub_support_python_315(tmp_path):
     )
     assert result.returncode == 0, result.stdout + result.stderr
 
-def test_compiler_imports_wait_until_source_compilation_on_315(tmp_path):
+@pytest.mark.parametrize('bytecode', [False, True])
+def test_compiler_imports_wait_until_source_compilation_on_315(tmp_path, bytecode):
     source = tmp_path / 'templates'
     source.mkdir()
     (source / 'page.html').write_text('hello', encoding='utf-8')
-    bundle = build(source, tmp_path / 'bundle')
+    bundle = build(source, tmp_path / 'bundle', bytecode=bytecode)
     run_python(sys.executable, '''from sys import argv, modules, version_info
 from suzuri import Engine
 engine = Engine(argv[1])
@@ -160,13 +161,14 @@ def run_python(interpreter, code, *arguments):
     assert result.returncode == 0, result.stdout + result.stderr
     return result.stdout.strip()
 
-def test_bundles_load_on_supported_runtimes_and_reject_older_ones(tmp_path, python_versions):
+@pytest.mark.parametrize('bytecode', [False, True])
+def test_bundles_load_on_supported_runtimes_and_reject_older_ones(tmp_path, python_versions, bytecode):
     source = tmp_path / 'templates'
     source.mkdir()
     (source / 'page.html').write_text('<out value="sentinel" />', encoding='utf-8')
     for version, interpreter in python_versions.items():
         bundle = tmp_path / version
-        run_python(interpreter, 'from sys import argv; from suzuri import build; build(argv[1], argv[2])', source, bundle)
+        run_python(interpreter, f'from sys import argv; from suzuri import build; build(argv[1], argv[2], bytecode={bytecode})', source, bundle)
         manifest = loads((bundle / 'manifest.json').read_text(encoding='utf-8'))
         assert manifest['python_requires'] == '>=' + version
 
@@ -198,12 +200,13 @@ else:
     raise AssertionError('Executed a 3.15 renderer on 3.14')
 ''', renderer)
 
-def test_source_cache_separates_python_targets(tmp_path, python_versions):
+@pytest.mark.parametrize('bytecode', [False, True])
+def test_source_cache_separates_python_targets(tmp_path, python_versions, bytecode):
     source = tmp_path / 'templates'
     source.mkdir()
     page = source / 'page.html'
     page.write_text('built on 3.14', encoding='utf-8')
-    code = "from sys import argv; from suzuri import Engine; print(Engine(argv[1], compiled_dir=argv[2]).render('page.html'))"
+    code = f"from sys import argv; from suzuri import Engine; print(Engine(argv[1], compiled_dir=argv[2], bytecode={bytecode}).render('page.html'))"
     cache = tmp_path / 'cache'
     assert run_python(python_versions['3.14'], code, source, cache) == 'built on 3.14'
     page.write_text('built on 3.15', encoding='utf-8')
