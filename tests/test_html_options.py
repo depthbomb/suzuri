@@ -3,7 +3,7 @@ from hashlib import sha256
 from html.parser import HTMLParser
 from concurrent.futures import ThreadPoolExecutor
 import pytest
-from suzuri import build, Engine, ArtifactError, TemplateRenderError
+from suzuri import build, Engine, __version__, ArtifactError, TemplateRenderError
 
 @pytest.fixture
 def make_bundle(tmp_path):
@@ -118,7 +118,7 @@ def test_metadata_comes_from_bundle_and_is_added_after_minification(make_bundle,
         'name': 'page.html',
         'source_sha256': sha256(source.encode('utf-8')).hexdigest(),
         'includes': ['parts/name.html'],
-        'compiler_version': '0.1.0',
+        'compiler_version': __version__,
         'application_version': 'app-1',
     }
     assert comment_metadata(body) == expected

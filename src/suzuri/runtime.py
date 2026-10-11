@@ -6,7 +6,7 @@ from suzuri.errors import ArtifactError
 from inspect import isawaitable, iscoroutine
 from collections.abc import Mapping, Iterable, Generator
 
-VERSION = '0.1.0'
+VERSION = '0.2.0'
 ABI_VERSION = 1
 COMPILER_REVISION = 3
 ESCAPING_POLICY = 'html-text-escape-all-v1'

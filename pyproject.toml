@@ -4,7 +4,7 @@ build-backend = 'setuptools.build_meta'
 
 [project]
 name = 'suzuri'
-version = '0.1.0'
+version = '0.2.0'
 description = 'An HTML template engine for Python that compiles views on demand.'
 readme = 'README.md'
 requires-python = '>=3.14'
