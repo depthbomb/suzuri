@@ -1,4 +1,4 @@
-# Suzuri
+# 🖌️ Suzuri
 
 Suzuri is an HTML template engine for Python. Write a template, ask for a view, and render it. The first render compiles that view into a Python module and saves it to disk. Later renders reuse it, including after your app restarts.
 
