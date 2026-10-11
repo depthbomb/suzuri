@@ -1,0 +1,49 @@
+[build-system]
+requires = ['setuptools>=84.0.0']
+build-backend = 'setuptools.build_meta'
+
+[project]
+name = 'suzuri'
+version = '0.1.0'
+description = 'An HTML template engine for Python that compiles views on demand.'
+readme = 'README.md'
+requires-python = '>=3.14'
+classifiers = [
+    'Development Status :: 4 - Beta',
+    'Programming Language :: Python :: 3',
+    'Programming Language :: Python :: 3 :: Only',
+    'Programming Language :: Python :: 3.14',
+    'Programming Language :: Python :: 3.15',
+    'Topic :: Text Processing :: Markup :: HTML',
+    'Operating System :: OS Independent',
+    'Typing :: Typed',
+]
+
+[project.optional-dependencies]
+dev = ['build>=1.2', 'pytest>=8', 'pytest-cov>=6', 'ruff>=0.11', 'mypy>=1.15', 'twine>=7']
+examples = ['Django>=5.2', 'Flask>=3.1', 'FastAPI>=0.115', 'Starlette>=0.46', 'httpx>=0.28']
+
+[tool.setuptools.packages.find]
+where = ['src']
+
+[tool.setuptools.package-data]
+suzuri = ['py.typed']
+
+[tool.pytest.ini_options]
+testpaths = ['tests']
+addopts = '-ra'
+
+[tool.ruff]
+target-version = 'py314'
+line-length = 120
+
+[tool.ruff.lint]
+select = ['E4', 'E7', 'E9', 'F', 'B', 'UP']
+
+[tool.ruff.format]
+quote-style = 'single'
+
+[tool.mypy]
+python_version = '3.14'
+strict = true
+files = ['src/suzuri']

@@ -1,0 +1,6 @@
+<from module="string" import="capwords" /><param name="items" type="list[str]" /><ul>
+<for each="item" in="items">
+<if test="item"><li><out value="capwords(item)" /></li></if>
+<else><li>Unnamed item</li></else>
+</for>
+</ul>

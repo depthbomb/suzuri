@@ -1,0 +1,6 @@
+<param name="author" type="dict[str, str]" />
+<param name="error_message" type="str" />
+<main>
+    <include src="partials/user_card.html" with="{'user': author}" />
+    <component name="alert" type="danger" icon="warning" :message="error_message" />
+</main>

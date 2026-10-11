@@ -1,0 +1,152 @@
+name: Tests
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'release' && github.ref_type != 'tag' }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ['3.14', '3.15']
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Create virtual environment
+        run: python -m venv .venv
+      - name: Select virtual environment
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            echo "$GITHUB_WORKSPACE/.venv/Scripts" >> "$GITHUB_PATH"
+          else
+            echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
+          fi
+      - name: Install development dependencies
+        run: python -m pip install -e '.[dev,examples]'
+      - name: Check release version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          python - <<'PY'
+          from os import environ
+          from pathlib import Path
+          from tomllib import loads
+
+          project = loads(Path('pyproject.toml').read_text(encoding='utf-8'))['project']
+          version = project['version']
+          tag = environ.get('RELEASE_TAG', '')
+          if tag and tag != f'v{version}':
+              raise SystemExit(f'Release tag {tag!r} does not match version {version!r}')
+          print(f'Checking {project["name"]} {version}')
+          PY
+      - name: Lint Python
+        run: python -m ruff check .
+      - name: Check Python types
+        run: python -m mypy
+      - name: Build distributions
+        run: python -m build
+      - name: Check distributions
+        run: python -m twine check --strict dist/*
+      - name: Install built wheel
+        run: python -m pip install --force-reinstall --no-deps dist/*.whl
+      - name: Check installed wheel
+        run: |
+          python -I - <<'PY'
+          from sys import prefix
+          from pathlib import Path
+          from tomllib import loads
+          from suzuri import __file__
+          from importlib.metadata import version
+
+          project = loads(Path('pyproject.toml').read_text(encoding='utf-8'))['project']
+          installed_version = version(project['name'])
+          if installed_version != project['version']:
+              raise SystemExit(f'Installed version {installed_version!r} does not match {project["version"]!r}')
+
+          if not Path(__file__).resolve().is_relative_to(Path(prefix).resolve()):
+              raise SystemExit(f'Imported checkout instead of installed wheel: {__file__}')
+          print(__file__)
+          PY
+      - name: Test installed wheel with coverage
+        run: |
+          test_dir=$(mktemp -d)
+          cp -R tests examples "$test_dir/"
+          cp pyproject.toml "$test_dir/"
+          cd "$test_dir"
+          python -m pytest --import-mode=importlib --cov=suzuri --cov-branch --cov-report=term-missing --cov-report="xml:$RUNNER_TEMP/coverage.xml"
+      - name: Check installed dependencies
+        run: python -m pip check
+      - name: Save validated distributions
+        if: runner.os == 'Linux' && matrix.python == '3.14'
+        uses: actions/upload-artifact@v7
+        with:
+          name: python-distributions-${{ matrix.os }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+      - name: Save coverage report
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-${{ matrix.os }}-${{ matrix.python }}
+          path: ${{ runner.temp }}/coverage.xml
+          if-no-files-found: error
+          retention-days: 14
+
+  compatibility:
+    name: Check bundles across Python versions
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Set up Python 3.14
+        id: python314
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.14'
+      - name: Set up Python 3.15
+        id: python315
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.15'
+      - name: Create virtual environments
+        env:
+          PYTHON314: ${{ steps.python314.outputs.python-path }}
+          PYTHON315: ${{ steps.python315.outputs.python-path }}
+        run: |
+          "$PYTHON314" -m venv .venv314
+          "$PYTHON315" -m venv .venv315
+          .venv314/bin/python -m pip install -e '.[dev]'
+          .venv315/bin/python -m pip install -e '.[dev]'
+      - name: Check cross-version bundles and caches
+        env:
+          SUZURI_PYTHON314: ${{ github.workspace }}/.venv314/bin/python
+          SUZURI_PYTHON315: ${{ github.workspace }}/.venv315/bin/python
+        run: .venv315/bin/python -m pytest tests/test_python_versions.py
